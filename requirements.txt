@@ -1,3 +1,5 @@
-ultralytics
+ultralytics>=8.0.0
 opencv-python
 numpy
+tqdm
+scikit-learn

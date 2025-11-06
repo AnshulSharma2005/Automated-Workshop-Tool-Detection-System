@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.vscode/
+.env
+runs/
+models/
+data/images/
+data/labels/
+*.pth
+*.pt
+.DS_Store
