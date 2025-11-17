@@ -1,0 +1,6 @@
+train: D:/projects/tooldetection/data/ToolsFixed/train/images
+val: D:/projects/tooldetection/data/ToolsFixed/valid/images
+test: D:/projects/tooldetection/data/ToolsFixed/test/images
+
+nc: 7
+names: ['Files', 'Hammers', 'Pincers', 'Pliers', 'Scissors', 'Screwdriver', 'Spanners']

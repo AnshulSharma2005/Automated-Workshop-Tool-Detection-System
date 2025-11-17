@@ -9,159 +9,174 @@ import cv2
 from PIL import Image
 from ultralytics import YOLO
 
-st.set_page_config(page_title="Workshop Tool Detection", page_icon="🛠️", layout="wide")
+# Page Setup
+st.set_page_config(
+    page_title="Workshop Tool Detection",
+    page_icon="🛠️",
+    layout="wide",
+)
 
-# ---------- Sidebar Controls ----------
-st.sidebar.title("⚙️ Settings")
-default_model_path = "runs/models/tool_detection/weights/best.pt"
-model_path = st.sidebar.text_input("Model path (.pt)", value=default_model_path)
-conf = st.sidebar.slider("Confidence threshold", 0.05, 0.95, 0.25, 0.01)
-iou = st.sidebar.slider("IoU threshold", 0.1, 0.95, 0.7, 0.01)
-imgsz = st.sidebar.selectbox("Image size", [320, 416, 512, 640, 800], index=3)
-device = st.sidebar.selectbox("Device", ["cpu"], index=0)  # keep CPU for your machine
+st.markdown("""
+<style>
+/* Reduce container width and padding */
+.main > div {
+    padding-top : 1rem;
+}
+
+/* Compact image preview box */
+.preview-box {
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 6px;
+    background: #fafafa;
+}
+
+/* Buttons centered */
+.stButton>button {
+    width : 100%;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+/* Section header style */
+h2, h3 {
+    margin-bottom : 0.3rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Sidebar
+st.sidebar.title("⚙️ Model Settings")
+default_model_path = "runs/detect/train12/weights/best.pt"
+
+model_path = st.sidebar.text_input("Model path", value=default_model_path)
+conf = st.sidebar.slider("Confidence", 0.05, 0.95, 0.25, 0.01)
+iou = st.sidebar.slider("IoU Threshold", 0.1, 0.95, 0.7, 0.01)
+imgsz = st.sidebar.selectbox("Image Size", [320, 416, 512, 640, 800], index=3)
+device = st.sidebar.selectbox("Device", ["cpu"], index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Tip: Keep images under ~5–8MB for snappy results.")
+st.sidebar.caption("Tip: Use clear, bright images for best results.")
 
-# ---------- Cache the model so it loads once ----------
+# Model Cache
 @st.cache_resource(show_spinner=True)
-def load_model(weights_path: str):
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"Model not found: {weights_path}")
-    return YOLO(weights_path)
+def load_model(model_path):
+    if not os.path.exists(model_path):
+        raise FileNotFoundError("Model file not found.")
+    return YOLO(model_path)
 
-# ---------- Helpers ----------
-def bgr_to_rgb(img_bgr: np.ndarray) -> np.ndarray:
+# Helper functions
+def bgr_to_rgb(img_bgr):
     return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-def pil_bytes(img_rgb: np.ndarray, fmt="JPEG") -> bytes:
-    pil_img = Image.fromarray(img_rgb)
+def pil_bytes(img, fmt="JPEG"):
     buf = io.BytesIO()
-    pil_img.save(buf, format=fmt, quality=95)
+    Image.fromarray(img).save(buf, format=fmt, quality=95)
     return buf.getvalue()
 
-def run_image_inference(model: YOLO, image: Image.Image, conf: float, iou: float, imgsz: int):
-    # Convert PIL -> numpy BGR for Ultralytics plotting
-    img_rgb = np.array(image.convert("RGB"))
-    results = model.predict(
-        img_rgb,
-        conf=conf,
-        iou=iou,
-        imgsz=imgsz,
-        device=device,
-        verbose=False
-    )
-    annotated_bgr = results[0].plot()  # returns BGR
-    annotated_rgb = bgr_to_rgb(annotated_bgr)
-    return results[0], annotated_rgb
+def run_image_inference(model, image, conf, iou, imgsz):
+    img = np.array(image)
+    res = model.predict(img, conf=conf, iou=iou, imgsz=imgsz, device=device)[0]
+    annotated = bgr_to_rgb(res.plot())
+    return res, annotated
 
-def save_uploaded_file(upload, suffix: str) -> Path:
-    out_dir = Path("streamlit_tmp")
-    out_dir.mkdir(exist_ok=True, parents=True)
-    fp = out_dir / f"{int(time.time()*1000)}_{upload.name}"
-    with open(fp, "wb") as f:
-        f.write(upload.getbuffer())
-    return fp
+# Title
+st.title("🛠️ Workshop Tool Detection Dashboard")
 
-def run_video_inference(model: YOLO, video_path: Path, conf: float, iou: float, imgsz: int) -> Path:
-    # Save outputs under a dedicated project/name so we can find the rendered video
-    project = "streamlit_outputs"
-    name = f"pred_{int(time.time())}"
-    results = model.predict(
-        source=str(video_path),
-        conf=conf,
-        iou=iou,
-        imgsz=imgsz,
-        device=device,
-        save=True,
-        project=project,
-        name=name,
-        verbose=False
-    )
-    # Ultralytics saves processed media in project/name/
-    out_dir = Path(project) / name
-    # Find first video file in output dir
-    for ext in (".mp4", ".avi", ".mov", ".mkv"):
-        cand = list(out_dir.glob(f"*{ext}"))
-        if cand:
-            return cand[0]
-    # fallback: return any file saved
-    files = list(out_dir.iterdir())
-    return files[0] if files else None
+# Two input panels (side-by-side)
+col_upload_img, col_upload_vid = st.columns([1, 1])
 
-# ---------- UI ----------
-st.title("🛠️ Automated Workshop Tool Detection — Web App")
+with col_upload_img:
+    st.subheader("📷 Upload Image")
+    up_img = st.file_uploader("Select image", type=["jpg", "jpeg", "png"])
 
-col_l, col_r = st.columns([1, 1])
-with col_l:
-    st.subheader("Upload Image")
-    up_img = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="img_up")
+with col_upload_vid:
+    st.subheader("🎞️ Upload Video")
+    up_vid = st.file_uploader("Select video", type=["mp4", "avi", "mov", "mkv"])
 
-with col_r:
-    st.subheader("Upload Video (optional)")
-    up_vid = st.file_uploader("Choose a video", type=["mp4", "avi", "mov", "mkv"], key="vid_up")
-
-# Load model (once)
-with st.spinner("Loading model..."):
+# Load model once
+with st.spinner("Loading YOLO model..."):
     try:
         model = load_model(model_path)
     except Exception as e:
-        st.error(f"Unable to load model. Check path.\n\n{e}")
+        st.error(str(e))
         st.stop()
 
-# ---------- Image flow ----------
-if up_img is not None:
-    image = Image.open(up_img)
-    st.image(image, caption="Uploaded", use_container_width=True)
+# IMAGE INFERENCE SECTION
+if up_img:
+    img = Image.open(up_img)
 
-    if st.button("Run detection on image", type="primary"):
-        with st.spinner("Running detection..."):
-            res, annotated_rgb = run_image_inference(model, image, conf, iou, imgsz)
+    col_show, col_detect = st.columns([1, 1])
 
-        # Show detections
-        st.subheader("Detections")
-        st.image(annotated_rgb, caption="Result", use_container_width=True)
+    with col_show:
+        st.subheader("📌 Uploaded Image")
+        st.image(img, use_container_width=True, caption="Original")
 
-        # Class-wise summary
-        if res.boxes is not None and len(res.boxes) > 0:
-            names = model.model.names if hasattr(model.model, "names") else {}
-            counts = {}
-            for cls_idx in res.boxes.cls.cpu().numpy().astype(int):
-                label = names.get(cls_idx, str(cls_idx))
-                counts[label] = counts.get(label, 0) + 1
-            st.write("**Objects detected:**")
-            st.json(counts)
-        else:
-            st.info("No objects detected.")
+    with col_detect:
+        st.subheader("🔍 Detection")
+        if st.button("Run Image Detection", type="primary"):
+            with st.spinner("Analyzing image..."):
+                res, annotated = run_image_inference(model, img, conf, iou, imgsz)
+            st.image(annotated, use_container_width=True, caption="Detected Objects")
 
-        # Download button
-        out_bytes = pil_bytes(annotated_rgb, fmt="JPEG")
-        st.download_button(
-            "Download result image",
-            data=out_bytes,
-            file_name="detection_result.jpg",
-            mime="image/jpeg"
-        )
+            # Class count summary
+            if res.boxes is not None and len(res.boxes) > 0:
+                names = model.model.names
+                counts = {}
+                for cls_id in res.boxes.cls.int().tolist():
+                    label = names.get(cls_id, str(cls_id))
+                    counts[label] = counts.get(label, 0) + 1
+                st.success("📊 Objects Found")
+                st.json(counts)
+            else:
+                st.info("No objects detected.")
 
-# ---------- Video flow ----------
-if up_vid is not None:
-    if st.button("Run detection on video"):
-        with st.spinner("Processing video — this may take a moment..."):
-            tmp_path = save_uploaded_file(up_vid, suffix="video")
-            out_video = run_video_inference(model, tmp_path, conf, iou, imgsz)
+            # Download button
+            st.download_button(
+                "Download Annotated Image",
+                data=pil_bytes(annotated),
+                file_name="result.jpg",
+                mime="image/jpeg",
+            )
 
-        if out_video and out_video.exists():
-            st.success("Done!")
-            st.video(str(out_video))
-            with open(out_video, "rb") as f:
+# VIDEO INFERENCE SECTION
+if up_vid:
+    if st.button("Run Video Detection"):
+        st.warning("⚠️ Processing video... may take time on CPU.")
+        tmp_path = Path("uploaded_video.mp4")
+        with open(tmp_path, "wb") as f:
+            f.write(up_vid.getbuffer())
+
+        with st.spinner("Running YOLO on video..."):
+            project = "streamlit_outputs"
+            name = f"pred_{int(time.time())}"
+
+            model.predict(
+                source=str(tmp_path),
+                conf=conf,
+                iou=iou,
+                imgsz=imgsz,
+                device=device,
+                save=True,
+                project=project,
+                name=name,
+                verbose=False,
+            )
+
+        out_path = Path(project) / name
+        files = list(out_path.glob("*.mp4"))
+
+        if files:
+            st.video(str(files[0]))
+            with open(files[0], "rb") as f:
                 st.download_button(
-                    "Download result video",
+                    "Download Processed Video",
                     data=f.read(),
-                    file_name=out_video.name,
+                    file_name="predicted_video.mp4",
                     mime="video/mp4"
                 )
         else:
-            st.error("Could not locate output video. Check logs or try a shorter clip.")
+            st.error("Could not generate output video.")
 
 st.markdown("---")
-st.caption("Built with Streamlit + Ultralytics YOLOv8")
+st.caption("Built with using Streamlit & YOLOv8")
